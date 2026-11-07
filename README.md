@@ -4,14 +4,14 @@ An [Agent Skill](https://agentskills.io/specification) for Claude Code that has 
 
 ## What a round looks like
 
-1. Pick three readers whose verdicts would split for different reasons, and keep them for every round.
+1. Pick three readers whose verdicts would split for different reasons, give each a model by how deeply the role reads, and keep the same readers on the same models for every round.
 2. Freeze the draft. Readers get a copy with collapsed sections emptied and images replaced by their alt text, since real readers judge without opening them.
 3. Run the three readers in parallel as separate `claude -p` processes. Each answers in JSON: where they stopped, what they think you decided, what pushed them away.
 4. Sort the reasons. Order, entry and missing explanations are fixed in the text. Missing facts ("not measured", "no comparison") go back to you, because rewording would only hide them.
-5. Revise, then count what the revision changed: new numbers, superlatives and names, and hedges added or removed. If anything is listed, you confirm it before the next round.
+5. Revise, then count what the revision changed: new numbers, superlatives and names, and hedges added or removed. If anything is listed, numbers and names the sources do not hold come out and hedges go back to the previous wording before the next round; the list reaches you with the final hand-off.
 6. Stop when no new reason appears, when only missing facts are left, or after three revisions. Then you read the draft.
 
-Two presets ship with it. `article` checks whether readers can restate what the author decided, left open, and why. `readme` checks whether a first-time visitor would try the project and what stopped them.
+Two presets ship with it. `article` checks whether readers can restate what the author decided, left open, and why, with a skimming reader on Haiku, the main reader on Sonnet and a practitioner on Opus. `readme` checks whether a first-time visitor would try the project and what stopped them.
 
 ## Install
 
@@ -37,15 +37,15 @@ context      NONE
 ok isolated - claude 2.1.302
 ```
 
-Exit 0 means the reader process starts with no tools, no MCP servers, none of your skills, and no memory or CLAUDE.md. Exit 1 means something reached it; exit 2 means the check could not run (the CLI is missing or failed). The skill stops on either. Then ask Claude Code to have personas read your draft; the skill picks the preset from the target.
+Run it once for each reader model with `--probe <model>`. Exit 0 means the reader process starts with no tools, no MCP servers, none of your skills, and no memory or CLAUDE.md. Exit 1 means something reached it; exit 2 means the check could not run (the CLI is missing or failed). The skill stops on either. Then ask Claude Code to have personas read your draft; the skill picks the preset from the target.
 
-Each round starts three `claude -p` processes with the reader model (Sonnet by default), so it counts against your Claude usage.
+Each round starts three `claude -p` processes, each on its reader's model (Sonnet when none is given), so it counts against your Claude usage.
 
 ## Why the readers run as separate processes
 
 A reader who has read your notes already knows what you meant, so it cannot show that the draft failed to say it. Each reader is started with `--setting-sources "" --strict-mcp-config --tools ""`, a replaced system prompt, auto memory off, and an empty working directory. These flags were checked on Claude Code 2.1.302 (2026-10-18). `--safe-mode` still let the reader see environment sections such as the user's email, and the empty `--setting-sources` alone still loaded the project's auto memory. The empty `--setting-sources` is observed behavior rather than documented, which is why the probe runs before every target.
 
-`PERSONA_READ_CMD` swaps in another CLI and `PERSONA_READ_MODEL` changes the reader model. The isolation is tested only with Claude Code.
+`PERSONA_READ_CMD` swaps in another CLI. A fourth argument to `read.sh` sets one reader's model, and `PERSONA_READ_MODEL` sets the default. The isolation is tested only with Claude Code.
 
 ## Why every revision is counted
 
@@ -67,11 +67,11 @@ python3 ~/.claude/skills/persona-read-loop/scripts/drift_count.py r0.md r1.md \
 }
 ```
 
-It exits 1 when anything other than `new_katakana` is listed. Numbers and names that appear in the previous round or in the evidence file (`--dossier`) count as already said. The vocabulary covers English and Japanese.
+It exits 1 when anything other than `new_katakana` is listed. Numbers and names that appear in the previous round or in the evidence file (`--dossier`) count as already said. The vocabulary covers English and Japanese. On exit 1 the skill removes new numbers and names the sources do not hold, returns hedges and superlatives to the previous round's wording, and reads the next round; the JSON and what was settled reach you with the final hand-off.
 
 ## Limits
 
-- The three readers are one model, so they are not independent samples and can agree for the same wrong reason.
+- The three readers are one model family (Claude), so they are not independent samples and can agree for the same wrong reason.
 - No study the author found (as of 2026-10-18) measures whether simulated readers stall where real readers stall.
 - A reader model does not know features released after its cutoff. Its "I don't know this term" about them is not a reason to revise, and the skill says so.
 
@@ -96,7 +96,7 @@ persona-read-loop is an Agent Skill for Claude Code that runs a closed revision 
 
 It exists because a reader that shares the writer's context cannot reveal what the draft fails to say, and because revising in answer to criticism drifts toward added hedges and claims. It is a pre-screen, not user research: the readers' evaluation is never an acceptance condition, and the loop stops on reasons (no new reason, only missing facts left, or three revisions), never on a score.
 
-Canonical facts: MIT license; maintained by one author (@shimo4228); synced one way from the author's Claude Code harness by `scripts/sync-from-local.sh` (it never commits). Requirements: the Claude Code CLI and Python 3.11+ (stdlib only; pytest for the tests). Each round starts three `claude -p` processes with the reader model (default `sonnet`, `PERSONA_READ_MODEL`). Payload: `skills/persona-read-loop/SKILL.md` (the loop: pick, freeze, read, sort, revise and count, stop), `presets/article.md` (readers primary / inflow / practitioner; restatement matched as match / shift / missing against the author's judgment), `presets/readme.md` (readers user / inflow / skeptic; `would_try` and reasons), `scripts/read.sh` (one isolated reader, and `--probe`, which checks tools 0, MCP servers 0, user skills 0 and a NONE answer about skills, memory and CLAUDE.md), `scripts/drift_count.py` with its tests.
+Canonical facts: MIT license; maintained by one author (@shimo4228); synced one way from the author's Claude Code harness by `scripts/sync-from-local.sh` (it never commits). Requirements: the Claude Code CLI and Python 3.11+ (stdlib only; pytest for the tests). Each round starts three `claude -p` processes, each reader on a model chosen by how deeply its role reads (a `read.sh` argument; otherwise `PERSONA_READ_MODEL`, default `sonnet`). Payload: `skills/persona-read-loop/SKILL.md` (the loop: pick, freeze, read, sort, revise and count, stop), `presets/article.md` (readers primary / inflow / practitioner on sonnet / haiku / opus; restatement matched as match / shift / missing against the author's judgment), `presets/readme.md` (readers user / inflow / skeptic; `would_try` and reasons), `scripts/read.sh` (one isolated reader with an optional model argument, and `--probe [model]`, which checks tools 0, MCP servers 0, user skills 0 and a NONE answer about skills, memory and CLAUDE.md), `scripts/drift_count.py` with its tests.
 
 Example: `read.sh --probe` on Claude Code 2.1.302 (2026-10-18) printed tools 0, mcp_servers 0, user skills 0 (built-in 22), context NONE, and exited 0. With `--setting-sources ""` removed by a wrapper, it listed 89 user skills and quoted CLAUDE.md headings, and exited 1.
 
